@@ -134,6 +134,8 @@ class BaseModel(ABC):
                 # added by leander
                 if name in ["seg_syn_mask_A", "seg_syn_contours_A", "seg_rec_mask_A", "seg_rec_contours_A"]:
                     visual_ret[name] = torch.sigmoid(getattr(self, name))
+                elif name in ['seg_syn_distance_B', 'seg_syn_distance_A', 'seg_rec_distance_B_detached', 'seg_rec_distance_B', 'seg_rec_distance_A']:
+                    visual_ret[name] = (getattr(self, name) + 1) /2
                 else:
                     visual_ret[name] = getattr(self, name)
         return visual_ret
