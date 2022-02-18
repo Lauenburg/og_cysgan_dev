@@ -7,7 +7,7 @@ experiment:
   slurm : 'slurm_jobs/'
   ccgan : 'ccgan/'
   pytc: 'pytorch_connectomics/'
-  install: 0
+  install: 1
   ccgan_train: 0
   ccgan_infer: 0
   blending: 0
@@ -27,7 +27,7 @@ ccgan:
   model_mode_train: '--save_epoch_freq 2'
   data_mode_train: '--batch_size 4 --ss_z 1 --ss_x 1 --ss_y 1  '
   weigths_train: '--lambda_identity 0.5 --cerberus_contour_weight 3  --cerberus_mask_weight 2 --cerberus_distance_weight 2 --cerberus_D_weight_syn 1 --cerberus_D_weight_rec 1 --lambda_B_BCD 2'
-  data_files_train: ' --max_dataset_size 800 --tif_A_file_name full_volume_em_3D_droped_85_75_80.tif --tif_A_file_name_label full_volume_seg_3D_droped_85_75_80.tif --tif_B_file_name full_volume_em_3D_droped0_0_0_tile_size_17_65_65.tif'
+  data_files_train: ' --max_dataset_size 1000 --tif_A_file_name full_volume_em_3D_droped_85_75_80.tif --tif_A_file_name_label full_volume_seg_3D_droped_85_75_80.tif --tif_B_file_name full_volume_em_3D_droped0_0_0_tile_size_17_65_65.tif'
   data_stride_infer: '--ss_z 8 --ss_x 32 --ss_y 32'
   data_files_infer: ' --max_dataset_size 99999 --tif_A_file_name  full_volume_em_3D_droped_85_75_80.tif --tif_A_file_name_label full_volume_seg_3D_droped_85_75_80.tif --tif_B_file_name full_volume_em_3D_droped0_0_0_tile_size_17_65_65.tif'
   data_vol_save: '--save_vol_A "0110000" --save_vol_B "0110000"'
