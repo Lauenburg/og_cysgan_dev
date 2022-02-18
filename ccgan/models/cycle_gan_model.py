@@ -54,6 +54,8 @@ class CycleGANModel(BaseModel):
 
         # configure then CycleGAN mode - has to be accessable during training and testing
         parser.add_argument('--cerberus',  action='store_true', help='adds loss based on difference between segmentation and GT mask')
+        parser.add_argument('--detach_advers',  action='store_true', help='if set to true creates a version of B_{B,r}, B_{C,r}, B_{D,r} that is detached from G_B and uses them for the pseudo cycle consistency')
+        parser.add_argument('--detach_pcycle',  action='store_true', help='if set to true creates a version of B_{B,r}, B_{C,r}, B_{D,r} that is detached from G_B and uses them for the additional adverserial loss')
 
         return parser
 
@@ -90,15 +92,24 @@ class CycleGANModel(BaseModel):
             visual_names_B.append('seg_syn_contours_B')
 
             visual_names_A.append('seg_rec_mask_A')
-            visual_names_B.append('seg_rec_mask_B_detached')
+            if self.opt.detach_advers and self.opt.detach_pcycle:
+                visual_names_B.append('seg_rec_mask_B_detached')
+            else:
+                visual_names_B.append('seg_rec_mask_B')
 
             visual_names_A.append('seg_rec_contours_A')           
-            visual_names_B.append('seg_rec_contours_B_detached')   
+            if self.opt.detach_advers and self.opt.detach_pcycle:
+                visual_names_B.append('seg_rec_contours_B_detached')  
+            else:
+                visual_names_B.append('seg_rec_contours_B')  
 
             if self.opt.bcd:
                 visual_names_B.append('seg_syn_distance_B')
-                visual_names_A.append('seg_syn_distance_A')          
-                visual_names_A.append('seg_rec_distance_B_detached')          
+                visual_names_A.append('seg_syn_distance_A')   
+                if self.opt.detach_advers and self.opt.detach_pcycle:
+                    visual_names_A.append('seg_rec_distance_B_detached')     
+                else:
+                    visual_names_A.append('seg_rec_distance_B')     
                 visual_names_A.append('seg_rec_distance_A')          
 
             if self.isTrain:
@@ -239,12 +250,13 @@ class CycleGANModel(BaseModel):
             # G_B and G_A do not have a tanh output due to the multi channel nature of the data
             self.rec_B = self.netG_A(torch.tanh(self.fake_A[:,:1,:,:,:]))  # G_A(G_B(B)) = B_rec
 
-            # detach version so that D_B_BCD can be used to update G_A with out updating G_B
-            # only feed the image and not the label components to the G_A
-            # the model expects input that is normalized between -1 and 1 
-            # G_B and G_A do not have a tanh output due to the multi channel nature of the data
-            self.fake_A_detached = self.fake_A[:,:1,:,:,:].detach().clone()
-            self.rec_B_detached = self.netG_A(torch.tanh(self.fake_A_detached))  # G_A(G_B(B)) = B_rec_detached
+            if self.opt.detach_advers or self.opt.detach_pcycle:
+                # detach version so that D_B_BCD can be used to update G_A with out updating G_B
+                # only feed the image and not the label components to the G_A
+                # the model expects input that is normalized between -1 and 1 
+                # G_B and G_A do not have a tanh output due to the multi channel nature of the data
+                self.fake_A_detached = self.fake_A[:,:1,:,:,:].detach().clone()
+                self.rec_B_detached = self.netG_A(torch.tanh(self.fake_A_detached))  # G_A(G_B(B)) = B_rec_detached
         else:
             # backward pass A_syn -> B_rec
             self.rec_B = self.netG_A(self.fake_A)   # G_A(G_B(B))
@@ -281,27 +293,38 @@ class CycleGANModel(BaseModel):
 
             # recreation of B
             # we do not have GT label components for B
-
-            # rec_B is used to ensure cycle consistency to real_B using an L1 loss, since real_A is normalized between -1 and 1 we have to apply the same normalization to rec_A
-            # since rec_B is passed through the whole cycle while real_B never enters the cycle we require the attached version
+            # if adverserial and pseudo cycle are detached we have not use for seg_rec_mask_B, seg_rec_contours_B, and seg_rec_distance_, 
+            if not (self.opt.detach_advers and self.opt.detach_pcycle):
+                # normalize with sigmoid as we apply a L1 loss between seg_syn_mask_B and seg_rec_mask_B 
+                # additionally D_B_BCD evaluates real_mask_A vs seg_rec_mask_B, since real_mask_A is normalized between 0 and 1 we have to apply the same normalization to seg_rec_mask_B
+                self.seg_rec_mask_B = torch.sigmoid(self.rec_B[:,1:2,:,:,:]) 
+                # normalize with sigmoid as we apply a L1 loss between seg_syn_contours_B and seg_rec_contours_B
+                # additionally D_B_BCD evaluates real_contours_A vs seg_rec_contours_B, since real_mask_A is normalized between 0 and 1 we have to apply the same normalization to seg_rec_contours_B 
+                self.seg_rec_contours_B = torch.sigmoid(self.rec_B[:,2:3,:,:,:]) 
+                # if the generator output has four channels and bcd is set to true process the distance map
+                if  self.opt.bcd and self.rec_B.shape[1] == 4:
+                    self.seg_rec_distance_B = torch.tanh(self.rec_B[:,3:4,:,:,:]) # D_B_BCD evaluates real_distance_A vs seg_rec_distance_B, since real_distance_A is normalized between -1 and 1 we have to apply the same normalization to seg_rec_distance_B
+                # rec_B is used to ensure cycle consistency to real_B using an L1 loss, since real_A is normalized between -1 and 1 we have to apply the same normalization to rec_A
+                # since rec_B is passed through the whole cycle while real_B never enters the cycle we require the attached version
             self.rec_B = torch.tanh(self.rec_B[:,:1,:,:,:])
 
-            # we have two additional adverserial losses, one for the synthesized B label components vs real A label components, and on for recreadted B label components vs real A label components
-            # the adverserial loss based on syn_label_B vs real_label A updates the generator B
-            # we nee a detached version of rec_label_B (this means that it is detached from G_B and attached to G_A) for the adverserial loss based on rec_label_B vs real_label A to only update generator A and not also generator A (which would end in updating A twice)
-            # additionally we require the detached version for the pseudo cycle consistency. For normal cycle consistency rec_A and rec_B are passed through the whole cycle while real_A and real_B never enter the cycle. 
-            # For the pseudo cycle consistency B_{B,r}, B_{C,r}, B_{D,r} run through the whole cycle while A_{B,s}, A_{C,s}, A_{D,s} run through half of the cycle.
-            # Accordingly to update G_B only once we nee the a detached version of B_{B,r}, B_{C,r}, B_{D,r} that ran only through the second half of the cycle
+            if self.opt.detach_advers or self.opt.detach_pcycle:
+                # we have two additional adverserial losses, one for the synthesized B label components vs real A label components, and on for recreadted B label components vs real A label components
+                # the adverserial loss based on syn_label_B vs real_label A updates the generator B
+                # we nee a detached version of rec_label_B (this means that it is detached from G_B and attached to G_A) for the adverserial loss based on rec_label_B vs real_label A to only update generator A and not also generator A (which would end in updating A twice)
+                # additionally we require the detached version for the pseudo cycle consistency. For normal cycle consistency rec_A and rec_B are passed through the whole cycle while real_A and real_B never enter the cycle. 
+                # For the pseudo cycle consistency B_{B,r}, B_{C,r}, B_{D,r} run through the whole cycle while A_{B,s}, A_{C,s}, A_{D,s} run through half of the cycle.
+                # Accordingly to update G_B only once we nee the a detached version of B_{B,r}, B_{C,r}, B_{D,r} that ran only through the second half of the cycle
 
-            # normalize with sigmoid as we apply a L1 loss between seg_syn_mask_B and seg_rec_mask_B_detached 
-            # additionally D_B_BCD evaluates real_mask_A vs seg_rec_mask_B_detached, since real_mask_A is normalized between 0 and 1 we have to apply the same normalization to seg_rec_mask_B_detached
-            self.seg_rec_mask_B_detached = torch.sigmoid(self.rec_B_detached[:,1:2,:,:,:]) 
-            # normalize with sigmoid as we apply a L1 loss between seg_syn_contours_B and seg_rec_contours_B_detached
-            # additionally D_B_BCD evaluates real_contours_A vs seg_rec_contours_B_detached, since real_mask_A is normalized between 0 and 1 we have to apply the same normalization to seg_rec_contours_B_detached 
-            self.seg_rec_contours_B_detached = torch.sigmoid(self.rec_B_detached[:,2:3,:,:,:]) 
-            # if the generator output has four channels and bcd is set to true process the distance map
-            if  self.opt.bcd and self.rec_B_detached.shape[1] == 4:
-                self.seg_rec_distance_B_detached = torch.tanh(self.rec_B_detached[:,3:4,:,:,:]) # D_B_BCD evaluates real_distance_A vs seg_rec_distance_B_detached, since real_distance_A is normalized between -1 and 1 we have to apply the same normalization to seg_rec_distance_B_detached
+                # normalize with sigmoid as we apply a L1 loss between seg_syn_mask_B and seg_rec_mask_B_detached 
+                # additionally D_B_BCD evaluates real_mask_A vs seg_rec_mask_B_detached, since real_mask_A is normalized between 0 and 1 we have to apply the same normalization to seg_rec_mask_B_detached
+                self.seg_rec_mask_B_detached = torch.sigmoid(self.rec_B_detached[:,1:2,:,:,:]) 
+                # normalize with sigmoid as we apply a L1 loss between seg_syn_contours_B and seg_rec_contours_B_detached
+                # additionally D_B_BCD evaluates real_contours_A vs seg_rec_contours_B_detached, since real_mask_A is normalized between 0 and 1 we have to apply the same normalization to seg_rec_contours_B_detached 
+                self.seg_rec_contours_B_detached = torch.sigmoid(self.rec_B_detached[:,2:3,:,:,:]) 
+                # if the generator output has four channels and bcd is set to true process the distance map
+                if  self.opt.bcd and self.rec_B_detached.shape[1] == 4:
+                    self.seg_rec_distance_B_detached = torch.tanh(self.rec_B_detached[:,3:4,:,:,:]) # D_B_BCD evaluates real_distance_A vs seg_rec_distance_B_detached, since real_distance_A is normalized between -1 and 1 we have to apply the same normalization to seg_rec_distance_B_detached
 
 
     def backward_D_basic(self, netD, real, fake, fake2=None):
@@ -361,10 +384,16 @@ class CycleGANModel(BaseModel):
         # merge the processed mask, contours, and distance map
         if  self.opt.bcd:
             concat_label_syn = torch.cat((self.seg_syn_mask_B, self.seg_syn_contours_B, self.seg_syn_distance_B), axis=1)
-            concat_label_rec = torch.cat((self.seg_rec_mask_B_detached, self.seg_rec_contours_B_detached, self.seg_rec_distance_B_detached), axis=1)
+            if self.opt.detach_advers:
+                concat_label_rec = torch.cat((self.seg_rec_mask_B_detached, self.seg_rec_contours_B_detached, self.seg_rec_distance_B_detached), axis=1)
+            else:
+                concat_label_rec = torch.cat((self.seg_rec_mask_B, self.seg_rec_contours_B, self.seg_rec_distance_B), axis=1)
         else:
             concat_label_syn = torch.cat((self.seg_syn_mask_B, self.seg_syn_contours_B), axis=1)
-            concat_label_rec = torch.cat((self.seg_rec_mask_B_detached, self.seg_rec_contours_B_detached), axis=1)
+            if self.opt.detach_advers:
+                concat_label_rec = torch.cat((self.seg_rec_mask_B_detached, self.seg_rec_contours_B_detached), axis=1)
+            else:
+                concat_label_rec = torch.cat((self.seg_rec_mask_B, self.seg_rec_contours_B), axis=1)
         
         # query a fake mask sample generated from a real B image 
         fake_B_BCD_syn = self.fake_B_BCD_syn_pool.query(concat_label_syn)
@@ -426,10 +455,18 @@ class CycleGANModel(BaseModel):
             # (Pseudo-Cycle) Consistency loss: A_C ≈ G_A(B_C)
             lambda_B_BCD = self.opt.lambda_B_BCD
             if self.opt.bcd:
-                self.loss_cycle_B_BCD = self.criterionPseudoCycle(torch.cat((self.seg_syn_mask_B, self.seg_syn_contours_B, self.seg_syn_distance_B), axis=1), 
-                                        torch.cat((self.seg_rec_mask_B_detached, self.seg_rec_contours_B_detached, self.seg_rec_distance_B_detached), axis=1)) * lambda_B_BCD
+                if self.opt.detach_pcycle:
+                    self.loss_cycle_B_BCD = self.criterionPseudoCycle(torch.cat((self.seg_syn_mask_B, self.seg_syn_contours_B, self.seg_syn_distance_B), axis=1), 
+                                        torch.cat((self.seg_rec_mask_B_detached, self.seg_rec_contours_B_detached, self.seg_rec_distance_B_detached), axis=1)) * lambda_B_BCD          
+                else:
+                    self.loss_cycle_B_BCD = self.criterionPseudoCycle(torch.cat((self.seg_syn_mask_B, self.seg_syn_contours_B, self.seg_syn_distance_B), axis=1), 
+                                        torch.cat((self.seg_rec_mask_B, self.seg_rec_contours_B, self.seg_rec_distance_B), axis=1)) * lambda_B_BCD
             else:
-                self.loss_cycle_B_BCD = self.criterionPseudoCycle(torch.cat((self.seg_syn_mask_B, self.seg_syn_contours_B), axis=1), 
+                if self.opt.detach_pcycle:
+                    self.loss_cycle_B_BCD = self.criterionPseudoCycle(torch.cat((self.seg_syn_mask_B, self.seg_syn_contours_B), axis=1), 
+                                        torch.cat((self.seg_rec_mask_B_detached, self.seg_rec_contours_B_detached), axis=1)) * lambda_B_BCD
+                else:
+                    self.loss_cycle_B_BCD = self.criterionPseudoCycle(torch.cat((self.seg_syn_mask_B, self.seg_syn_contours_B), axis=1), 
                                         torch.cat((self.seg_rec_mask_B_detached, self.seg_rec_contours_B_detached), axis=1)) * lambda_B_BCD
                 
         # GAN loss D_A(G_A(A))
@@ -442,10 +479,18 @@ class CycleGANModel(BaseModel):
             # GAN loss D_B_BCD(G_B(B))
             if self.opt.bcd:
                 self.loss_G_B_BCD_syn = self.criterionGAN(self.netD_B_BCD(torch.cat((self.seg_syn_mask_B, self.seg_syn_contours_B, self.seg_syn_distance_B), axis=1)), True) * self.opt.cerberus_D_weight_syn
-                self.loss_G_B_BCD_rec = self.criterionGAN(self.netD_B_BCD(torch.cat((self.seg_rec_mask_B_detached, self.seg_rec_contours_B_detached, self.seg_rec_distance_B_detached), axis=1)), True) * self.opt.cerberus_D_weight_rec
+                if self.opt.detach_advers:
+                    self.loss_G_B_BCD_rec = self.criterionGAN(self.netD_B_BCD(torch.cat((self.seg_rec_mask_B_detached, self.seg_rec_contours_B_detached, self.seg_rec_distance_B_detached), axis=1)), True) * self.opt.cerberus_D_weight_rec
+                else:
+                    self.loss_G_B_BCD_rec = self.criterionGAN(self.netD_B_BCD(torch.cat((self.seg_rec_mask_B, self.seg_rec_contours_B, self.seg_rec_distance_B), axis=1)), True) * self.opt.cerberus_D_weight_rec
             else:
                 self.loss_G_B_BCD_syn = self.criterionGAN(self.netD_B_BCD(torch.cat((self.seg_syn_mask_B, self.seg_syn_contours_B), axis=1)), True) * self.opt.cerberus_D_weight_syn
-                self.loss_G_B_BCD_rec = self.criterionGAN(self.netD_B_BCD(torch.cat((self.seg_rec_mask_B_detached, self.seg_rec_contours_B_detached), axis=1)), True) * self.opt.cerberus_D_weight_rec
+                if self.opt.detach_advers:
+                    self.loss_G_B_BCD_rec = self.criterionGAN(self.netD_B_BCD(torch.cat((self.seg_rec_mask_B_detached, self.seg_rec_contours_B_detached), axis=1)), True) * self.opt.cerberus_D_weight_rec
+                else:
+                    self.loss_G_B_BCD_rec = self.criterionGAN(self.netD_B_BCD(torch.cat((self.seg_rec_mask_B, self.seg_rec_contours_B), axis=1)), True) * self.opt.cerberus_D_weight_rec
+
+
 
           
         if self.opt.cerberus:

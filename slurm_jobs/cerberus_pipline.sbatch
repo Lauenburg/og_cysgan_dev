@@ -94,12 +94,13 @@ python train.py \
 --n_epochs $ccgan_epochs --n_epochs_decay $ccgan_epochs_decay \
 --display_server $ccgan_display_server --display_port $ccgan_display_port \
 --display_ncols $ccgan_display_columns \
-$ccgan_vargs_train \
+$ccgan_model_mode \
+$ccgan_data_mode \
 $ccgan_display_train \
+$ccgan_model_mode_train \
 $ccgan_data_mode_train \
-$ccgan_data_vol_train \
 $ccgan_weigths_train \
-$ccgan_data_files_train 
+$ccgan_data_files_infer 
 echo ""
 fi
 
@@ -112,11 +113,9 @@ python test.py --name $ccgan_model_name  --model cycle_gan \
 --checkpoints_dir "${experiment_base_dir}${experiment_slurm}${experiment_name}/ccgan/checkpoints" \
 --results_dir "${experiment_base_dir}${experiment_slurm}${experiment_name}/ccgan/results/" \
 --phase test --num_test $ccgan_num_test \
-$ccgan_vargs_infer \
-$ccgan_data_mode_infer \
-$ccgan_data_vol_infer \
-$ccgan_data_files_infer \
-$ccgan_data_vol_save
+$data_stride_infer \
+$data_files_infer \
+$data_vol_save 
 echo ""
 fi
 
