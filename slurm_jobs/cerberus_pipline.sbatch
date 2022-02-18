@@ -99,7 +99,7 @@ $ccgan_display_train \
 $ccgan_model_mode_train \
 $ccgan_data_mode_train \
 $ccgan_weigths_train \
-$ccgan_data_files_infer 
+$ccgan_data_files_train 
 echo ""
 fi
 
