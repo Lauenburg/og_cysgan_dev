@@ -1,10 +1,9 @@
 #!/bin/bash
 #SBATCH -c 4                 # Number of cores (-c)
 #SBATCH -t 0-14:00           # Runtime in D-HH:MM, minimum of 10 minutes
-#SBATCH -p cox      # Partition to submit to
-##SBATCH --gres=gpu:4	       # Request a gpu -> do NOT set to zero or scripts will fail
-#SBATCH --gres=gpu:6	       # Request a gpu -> do NOT set to zero or scripts will fail
-#SBATCH --mem=200000          # Memory pool for all cores (see also --mem-per-cpu)
+#SBATCH -p cox               # Partition to submit to
+#SBATCH --gres=gpu:4	     # Request a gpu -> do NOT set to zero or scripts will fail
+#SBATCH --mem=200000         # Memory pool for all cores (see also --mem-per-cpu)
 #SBATCH -o ./slurm_out/pipline_output.out  # File to which STDOUT will be written - add %j to the name to include the jobid
 #SBATCH -e ./slurm_err/pipline_errors.err  # File to which STDERR will be written - add %j to the name to include the jobid
 
@@ -113,9 +112,11 @@ python test.py --name $ccgan_model_name  --model cycle_gan \
 --checkpoints_dir "${experiment_base_dir}${experiment_slurm}${experiment_name}/ccgan/checkpoints" \
 --results_dir "${experiment_base_dir}${experiment_slurm}${experiment_name}/ccgan/results/" \
 --phase test --num_test $ccgan_num_test \
-$data_stride_infer \
-$data_files_infer \
-$data_vol_save 
+$ccgan_model_mode \
+$ccgan_data_mode \
+$ccgan_data_stride_infer \
+$ccgan_data_files_infer \
+$ccgan_data_vol_save 
 echo ""
 fi
 
