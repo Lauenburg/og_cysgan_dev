@@ -4,7 +4,7 @@
 
 1. Clone the [Pytorch Connectomics](https://github.com/zudi-lin/pytorch_connectomics) in to the root folder of this repo.
 2. Create a dataset folder with the following structure in `cerberus/ccgan`.
-    ```
+    ```bash
     ├── datasets
         └── dorsal_crop_3D_full
             ├── gt_seg_mask
@@ -14,7 +14,7 @@
             └── trainB
     ```
 3. Populate the dataset folder with the provided data:
-    ```
+    ```bash
     .
     └── dorsal_crop_3D_full
         ├── gt_seg_mask
@@ -31,7 +31,8 @@
 4. Go to `cerberus/slurm_jobs`.
 5. Start a `visdom` server by running: `sbatch --time=0-30:00 --export=port=9999 visdomserver.sbatch`
 5. Start the pipline by running:
-```
+
+```bash
 sbatch --time=1200 --job-name='ccgan__dorsal_crop_3D_full__Cerb2__25E_15_DE__vs_17_65_65' \
 --output="./slurm_out/ccgan__dorsal_crop_3D_full__Cerb2__25E_15_DE__vs_17_65_65.out" \
 --error="./slurm_err/ccgan__dorsal_crop_3D_full__Cerb2__25E_15_DE__vs_17_65_65.err" \
@@ -65,7 +66,7 @@ If we want to monitor the standard output and error output be aware that for the
 
 Example:
 ```bash
-sbatch --time=1400 --job-name='ccgan__dorsal_crop_3D_full__Cerb2__25E_15_DE__vs_17_65_65' --output="./slurm_out/ccgan__dorsal_crop_3D_full__Cerb2__25E_15_DE__vs_17_65_65.out" --error="./slurm_err/ccgan__dorsal_crop_3D_full__Cerb2__25E_15_DE__vs_17_65_65.err" 
+sbatch --partition seas_gpu --time=1400 --job-name='ccgan__dorsal_crop_3D_full__Cerb2__25E_15_DE__vs_17_65_65' --output="./slurm_out/ccgan__dorsal_crop_3D_full__Cerb2__25E_15_DE__vs_17_65_65.out" --error="./slurm_err/ccgan__dorsal_crop_3D_full__Cerb2__25E_15_DE__vs_17_65_65.err" 
 ccgan_pipline.sbatch "/n/pfister_lab2/Lab/leander/em2exm/slurm_jobs/.default_configs/ccgan__dorsal_crop_3D_full__Cerb2__25E_15_DE__vs_17_65_65.yaml"
 ```
 
@@ -135,9 +136,6 @@ List and explanation of the different configurations that should configured
         * --save_vol_B 0000000 : A string of seven binary values indicating which volumes to save, Order of volumes: fake_A, seg_syn_mask_B, seg_syn_contours_B, seg_rec_mask_B, seg_rec_contours_B, seg_syn_distance_B, seg_rec_distance_B
     * num_test: Number of tests that should be run - requires high value to process all images
 
-#### Additional configurations
-
-
 ## Multiple experiments
 
 To start multiple experiments copy the configurations file, adjust the file name, change the name of the experiment, the name of the file, and which ever hyperparameter is to be investigated.
@@ -168,9 +166,8 @@ ccgan_pipline.sbatch "/n/pfister_lab2/Lab/leander/em2exm/slurm_jobs/.default_con
 ```
 
 ## Slurm
-CylceGAN is executeted using sbatch file `sbatch cerberus_pipline.sbatch`.
 
-As SLURM interprets arguments as string literals we have to pass the SLURM specific arguments using the SLURM option which can be viewed via `sbatch --help`. Alternatively, we can overwrite them directly in `cerberus_pipline.sbatch`. The SLURM specific configurations are defined at the top of the `sbatch cerberus_pipline.sbatch` script and marked with an `##SBATCH` at the beginning. 
+As SLURM interprets arguments as string literals we have to pass the SLURM specific arguments using the SLURM option which can be viewed via `sbatch --help`. Alternatively, we can overwrite them directly in `cerberus_pipline.sbatch`. The SLURM specific configurations are defined at the top of the `cerberus_pipline.sbatch` script and marked with an `##SBATCH` at the beginning. 
 
 Important settings:
 The training process requires 4 workers:
@@ -241,8 +238,3 @@ Example:
 ```bash
 ccgan__dorsal_crop_dense_filtered__vanilla__20E_15DE
 ```
-
-## Datasets
-
-See `./ccgan/datasets/README.md` for more specific information.
-Short intro and overview:

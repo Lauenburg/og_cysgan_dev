@@ -138,7 +138,6 @@ class BaseModel(ABC):
                     visual_ret[name] = getattr(self, name)
         return visual_ret
 
-    # added by leander
     def get_current_poses(self):
         pos_ret = OrderedDict()
         for name in self.pos_names:

@@ -2,7 +2,7 @@
 #SBATCH -c 4                 # Number of cores (-c)
 #SBATCH -t 0-14:00           # Runtime in D-HH:MM, minimum of 10 minutes
 #SBATCH -p cox               # Partition to submit to
-#SBATCH --gres=gpu:4	     # Request a gpu -> do NOT set to zero or scripts will fail
+#SBATCH --gres=gpu:6	     # Request a gpu -> do NOT set to zero or scripts will fail
 #SBATCH --mem=200000         # Memory pool for all cores (see also --mem-per-cpu)
 #SBATCH -o ./slurm_out/pipline_output.out  # File to which STDOUT will be written - add %j to the name to include the jobid
 #SBATCH -e ./slurm_err/pipline_errors.err  # File to which STDERR will be written - add %j to the name to include the jobid
