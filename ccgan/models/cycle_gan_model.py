@@ -56,7 +56,9 @@ class CycleGANModel(BaseModel):
         parser.add_argument('--cerberus',  action='store_true', help='adds loss based on difference between segmentation and GT mask')
         parser.add_argument('--detach_advers',  action='store_true', help='if set to true creates a version of B_{B,r}, B_{C,r}, B_{D,r} that is detached from G_B and uses them for the pseudo cycle consistency')
         parser.add_argument('--detach_pcycle',  action='store_true', help='if set to true creates a version of B_{B,r}, B_{C,r}, B_{D,r} that is detached from G_B and uses them for the additional adverserial loss')
-
+        parser.add_argument('--half_advers',  action='store_true', help='if set to true the adverserial loss only uses A_{B,s}, A_{C,s}, A_{D,s} and therefore only updates G_B and not G_A')
+        parser.add_argument('--visualize_dist_map',  action='store_true', help='if set to the network will visualize and save the distnce maps')
+        parser
         return parser
 
     def __init__(self, opt):
@@ -68,7 +70,9 @@ class CycleGANModel(BaseModel):
         BaseModel.__init__(self, opt)
         # specify the training losses you want to print out. The training/test scripts will call <BaseModel.get_current_losses>
         if self.opt.cerberus:
-            self.loss_names = ['D_A', 'G_A', 'cycle_A','idt_A', 'D_B', 'G_B', 'cycle_B', 'idt_B', 'D_B_BCD', 'G_B_BCD_syn', 'G_B_BCD_rec', 'cycle_B_BCD', 'seg_syn_logits_mask', 'seg_syn_logits_contour', 'seg_rec_logits_mask', 'seg_rec_logits_contour']
+            self.loss_names = ['D_A', 'G_A', 'cycle_A','idt_A', 'D_B', 'G_B', 'cycle_B', 'idt_B', 'D_B_BCD', 'G_B_BCD_syn', 'cycle_B_BCD', 'seg_syn_logits_mask', 'seg_syn_logits_contour', 'seg_rec_logits_mask', 'seg_rec_logits_contour']
+            if not self.opt.half_advers:
+                self.loss_names = self.loss_names + ['G_B_BCD_rec']
             if self.opt.bcd:
               self.loss_names = self.loss_names +  ["seg_syn_logits_distance", "seg_rec_logits_distance"]
         else:
@@ -171,7 +175,8 @@ class CycleGANModel(BaseModel):
             if self.opt.cerberus:
                 self.real_GT_M_pool = ImagePool(opt.pool_size)
                 self.fake_B_BCD_syn_pool = ImagePool(opt.pool_size)
-                self.fake_B_BCD_rec_pool = ImagePool(opt.pool_size)
+                if not self.opt.half_advers: 
+                    self.fake_B_BCD_rec_pool = ImagePool(opt.pool_size)
             # define loss functions
             self.criterionGAN = networks.GANLoss(opt.gan_mode).to(self.device)  # define GAN loss.
             self.criterionCycle = torch.nn.L1Loss()
@@ -197,6 +202,9 @@ class CycleGANModel(BaseModel):
             if self.opt.cerberus:
                 self.optimizer_D_BCD = torch.optim.Adam(itertools.chain(self.netD_B_BCD.parameters()), lr=opt.lr, betas=(opt.beta1, 0.999))
                 self.optimizers.append(self.optimizer_D_BCD)
+
+        if self.opt.half_advers and self.opt.detach_advers:
+            ConfigException("These configurations do not match", f"If opt.half_advers is {self.opt.half_advers} there is no point in setting opt.detach_advers to {self.opt.detach_advers} as S_{{B,r}} is never used")
 
 
     def set_input(self, input):
@@ -384,21 +392,26 @@ class CycleGANModel(BaseModel):
         # merge the processed mask, contours, and distance map
         if  self.opt.bcd:
             concat_label_syn = torch.cat((self.seg_syn_mask_B, self.seg_syn_contours_B, self.seg_syn_distance_B), axis=1)
-            if self.opt.detach_advers:
-                concat_label_rec = torch.cat((self.seg_rec_mask_B_detached, self.seg_rec_contours_B_detached, self.seg_rec_distance_B_detached), axis=1)
-            else:
-                concat_label_rec = torch.cat((self.seg_rec_mask_B, self.seg_rec_contours_B, self.seg_rec_distance_B), axis=1)
+            if not self.opt.half_advers:
+                if self.opt.detach_advers:
+                    concat_label_rec = torch.cat((self.seg_rec_mask_B_detached, self.seg_rec_contours_B_detached, self.seg_rec_distance_B_detached), axis=1)
+                else:
+                    concat_label_rec = torch.cat((self.seg_rec_mask_B, self.seg_rec_contours_B, self.seg_rec_distance_B), axis=1)
         else:
             concat_label_syn = torch.cat((self.seg_syn_mask_B, self.seg_syn_contours_B), axis=1)
-            if self.opt.detach_advers:
-                concat_label_rec = torch.cat((self.seg_rec_mask_B_detached, self.seg_rec_contours_B_detached), axis=1)
-            else:
-                concat_label_rec = torch.cat((self.seg_rec_mask_B, self.seg_rec_contours_B), axis=1)
+            if not self.opt.half_advers:
+                if self.opt.detach_advers:
+                    concat_label_rec = torch.cat((self.seg_rec_mask_B_detached, self.seg_rec_contours_B_detached), axis=1)
+                else:
+                    concat_label_rec = torch.cat((self.seg_rec_mask_B, self.seg_rec_contours_B), axis=1)
         
-        # query a fake mask sample generated from a real B image 
-        fake_B_BCD_syn = self.fake_B_BCD_syn_pool.query(concat_label_syn)
-        fake_B_BCD_rec = self.fake_B_BCD_rec_pool.query(concat_label_rec)
-        self.loss_D_B_BCD = self.backward_D_basic(self.netD_B_BCD, real_GT_M, fake_B_BCD_syn, fake_B_BCD_rec)
+        if not self.opt.half_advers: 
+            fake_B_BCD_syn = self.fake_B_BCD_syn_pool.query(concat_label_syn)
+            fake_B_BCD_rec = self.fake_B_BCD_rec_pool.query(concat_label_rec)
+            self.loss_D_B_BCD = self.backward_D_basic(self.netD_B_BCD, real_GT_M, fake_B_BCD_syn, fake_B_BCD_rec)
+        else:
+            fake_B_BCD_syn = self.fake_B_BCD_syn_pool.query(concat_label_syn)
+            self.loss_D_B_BCD = self.backward_D_basic(self.netD_B_BCD, real_GT_M, fake_B_BCD_syn)
 
     def backward_G(self):
         """Calculate the loss for generators G_A and G_B"""
@@ -479,16 +492,20 @@ class CycleGANModel(BaseModel):
             # GAN loss D_B_BCD(G_B(B))
             if self.opt.bcd:
                 self.loss_G_B_BCD_syn = self.criterionGAN(self.netD_B_BCD(torch.cat((self.seg_syn_mask_B, self.seg_syn_contours_B, self.seg_syn_distance_B), axis=1)), True) * self.opt.cerberus_D_weight_syn
-                if self.opt.detach_advers:
-                    self.loss_G_B_BCD_rec = self.criterionGAN(self.netD_B_BCD(torch.cat((self.seg_rec_mask_B_detached, self.seg_rec_contours_B_detached, self.seg_rec_distance_B_detached), axis=1)), True) * self.opt.cerberus_D_weight_rec
-                else:
-                    self.loss_G_B_BCD_rec = self.criterionGAN(self.netD_B_BCD(torch.cat((self.seg_rec_mask_B, self.seg_rec_contours_B, self.seg_rec_distance_B), axis=1)), True) * self.opt.cerberus_D_weight_rec
+                # also update G_A by applying the discriminator also to S_{B,r}
+                if not self.opt.half_advers:
+                    if self.opt.detach_advers:
+                        self.loss_G_B_BCD_rec = self.criterionGAN(self.netD_B_BCD(torch.cat((self.seg_rec_mask_B_detached, self.seg_rec_contours_B_detached, self.seg_rec_distance_B_detached), axis=1)), True) * self.opt.cerberus_D_weight_rec
+                    else:
+                        self.loss_G_B_BCD_rec = self.criterionGAN(self.netD_B_BCD(torch.cat((self.seg_rec_mask_B, self.seg_rec_contours_B, self.seg_rec_distance_B), axis=1)), True) * self.opt.cerberus_D_weight_rec
             else:
                 self.loss_G_B_BCD_syn = self.criterionGAN(self.netD_B_BCD(torch.cat((self.seg_syn_mask_B, self.seg_syn_contours_B), axis=1)), True) * self.opt.cerberus_D_weight_syn
-                if self.opt.detach_advers:
-                    self.loss_G_B_BCD_rec = self.criterionGAN(self.netD_B_BCD(torch.cat((self.seg_rec_mask_B_detached, self.seg_rec_contours_B_detached), axis=1)), True) * self.opt.cerberus_D_weight_rec
-                else:
-                    self.loss_G_B_BCD_rec = self.criterionGAN(self.netD_B_BCD(torch.cat((self.seg_rec_mask_B, self.seg_rec_contours_B), axis=1)), True) * self.opt.cerberus_D_weight_rec
+                 # also update G_A by applying the discriminator also to S_{B,r}
+                if not self.opt.half_advers:
+                    if self.opt.detach_advers:
+                        self.loss_G_B_BCD_rec = self.criterionGAN(self.netD_B_BCD(torch.cat((self.seg_rec_mask_B_detached, self.seg_rec_contours_B_detached), axis=1)), True) * self.opt.cerberus_D_weight_rec
+                    else:
+                        self.loss_G_B_BCD_rec = self.criterionGAN(self.netD_B_BCD(torch.cat((self.seg_rec_mask_B, self.seg_rec_contours_B), axis=1)), True) * self.opt.cerberus_D_weight_rec
 
 
 
@@ -497,7 +514,10 @@ class CycleGANModel(BaseModel):
             # add the mask and contour losses for the A->B->A loop
             cerberus_loss = self.loss_seg_syn_logits_mask + self.loss_seg_syn_logits_contour + self.loss_seg_rec_logits_mask + self.loss_seg_rec_logits_contour
             # add the adverserial losses
-            cerberus_loss = cerberus_loss + (self.loss_G_B_BCD_syn + self.loss_G_B_BCD_rec)
+            if not self.opt.half_advers:
+                cerberus_loss = cerberus_loss + (self.loss_G_B_BCD_syn + self.loss_G_B_BCD_rec)
+            else:
+                cerberus_loss = cerberus_loss + self.loss_G_B_BCD_syn
             if self.opt.bcd:
                 # add the distance based losses for the A->B->A loop
                 cerberus_loss = cerberus_loss + self.loss_seg_syn_logits_distance + self.loss_seg_rec_logits_distance

@@ -82,22 +82,16 @@ if __name__ == '__main__':
                         os.makedirs(folder_name, exist_ok=False)
                     except FileExistsError as e:
                         print(e)
-                    try:
-                        os.makedirs(folder_name, exist_ok=False)
-                    except FileExistsError as e:
-                        print(e)
 
             poses = model.get_current_poses()  # get image results
 
             # A coordinate frame
             pos_A = poses["pos_A"]
             pos_name_A = "_".join([str(a.cpu().detach().numpy()[0]) for a in pos_A]) + '.npy' 
-            print(pos_name_A)
             img_A = [visuals["fake_B"], visuals["seg_syn_mask_A"], visuals["seg_syn_contours_A"], visuals["seg_rec_mask_A"], visuals["seg_rec_contours_A"]]
             names_A = ["fake_B", "seg_syn_mask_A", "seg_syn_contours_A", "seg_rec_mask_A", "seg_rec_contours_A"]
 
             for i, (name, img) in enumerate(zip(names_A, img_A)):
-                print(os.path.join(os.path.join(image_dir, name), pos_name_A))
                 image_tensor = img.data
                 image_numpy = image_tensor[0].cpu().float().numpy()
                 save_path = os.path.join(os.path.join(image_dir, name), pos_name_A)   
@@ -113,7 +107,6 @@ if __name__ == '__main__':
             names_B = ["fake_A", "seg_syn_mask_B", "seg_syn_contours_B", "seg_rec_mask_B", "seg_rec_contours_B"]
 
             for i, (name, img) in enumerate(zip(names_B, img_B)):
-                print(os.path.join(os.path.join(image_dir, name), pos_name_A))
                 image_tensor = img.data
                 image_numpy = image_tensor[0].cpu().float().numpy()
                 save_path = os.path.join(os.path.join(image_dir, name), pos_name_B)   

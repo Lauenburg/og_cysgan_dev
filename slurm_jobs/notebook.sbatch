@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH -c 4               # Number of cores (-c)
 #SBATCH -t 0-12:00          # Runtime in D-HH:MM, minimum of 10 minutes
-#SBATCH -p cox #gpu_requeue #serial_requeue #gpu_requeue      # Partition to submit to
+#SBATCH -p seas_gpu #gpu_requeue #serial_requeue #gpu_requeue      # Partition to submit to
 #SBATCH --gres=gpu:1	    # Request a gpu
 #SBATCH --mem=50000          # Memory pool for all cores (see also --mem-per-cpu)
 #SBATCH -o ./slurm_out/notebook_output_%j.out  # File to which STDOUT will be written, %j inserts jobid

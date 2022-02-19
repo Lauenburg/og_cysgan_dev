@@ -48,8 +48,6 @@ class BaseOptions():
         parser.add_argument('--ss_x', type=int, default=32, help='when using volume_dataset; stride size for dim x: 16 | 32 | 64 | 128')
         parser.add_argument('--ss_y', type=int, default=32, help='when using volume_dataset; stride size for dim y: 16 | 32 | 64 | 128')
         parser.add_argument('--bcd', action='store_true', help='if set to true the label will also include the distance map in addition to the binary and contour map')
-        parser.add_argument('--not_iso', action='store_true', help='if set to true UNets only uses 3D convolutions in innermost layers')
-        parser.add_argument('--no_convT',action='store_true', help='if false use transpose convolutions, if true use NN upsampling and convolutions')
         parser.add_argument('--dataset_mode', type=str, default='unaligned', help='chooses how datasets are loaded. [unaligned | vunaligned | single ]')
         parser.add_argument('--direction', type=str, default='AtoB', help='AtoB or BtoA')
         parser.add_argument('--serial_batches', action='store_true', help='if true, takes images in order to make batches, otherwise takes them randomly')
