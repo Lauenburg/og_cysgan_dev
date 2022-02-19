@@ -23,7 +23,7 @@ ccgan:
   display_columns : '10'
   model_mode: '--cerberus --netG cerberus'
   data_mode: '--dataset_mode cerberus --data_dim 3 --bcd --vs_z 17 --vs_x 97 --vs_y 97'
-  display_train: '--no_html --display_ncols 0 --display_freq 200  --print_freq 10' 
+  display_train: '--no_html --display_ncols 0 --display_freq 500  --print_freq 100' 
   model_mode_train: '--save_epoch_freq 2'
   data_mode_train: '--batch_size 4 --ss_z 1 --ss_x 1 --ss_y 1  '
   weigths_train: '--lambda_identity 0.5 --cerberus_contour_weight 3  --cerberus_mask_weight 2 --cerberus_distance_weight 2 --cerberus_D_weight_syn 1 --cerberus_D_weight_rec 1 --lambda_B_BCD 2'
