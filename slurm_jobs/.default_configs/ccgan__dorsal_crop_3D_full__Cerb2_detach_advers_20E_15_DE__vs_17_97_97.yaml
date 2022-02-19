@@ -1,7 +1,7 @@
 ## experiment
-## sbatch --partition cox --time=1400 --job-name='ccgan__dorsal_crop_3D_full__Cerb2__25E_15_DE__vs_17_97_97' --output="./slurm_out/ccgan__dorsal_crop_3D_full__Cerb2__25E_15_DE__vs_17_97_97.out" --error="./slurm_err/ccgan__dorsal_crop_3D_full__Cerb2__25E_15_DE__vs_17_97_97.err" cerberus_pipline.sbatch "/n/pfister_lab2/Lab/leander/cerberus/slurm_jobs/.default_configs/ccgan__dorsal_crop_3D_full__Cerb2__25E_15_DE__vs_17_97_97.yaml" 
+## sbatch --partition cox --time=1400 --job-name='ccgan__dorsal_crop_3D_full__Cerb2_detach_advers_20E_15_DE__vs_17_97_97' --output="./slurm_out/ccgan__dorsal_crop_3D_full__Cerb2_detach_advers_20E_15_DE__vs_17_97_97.out" --error="./slurm_err/ccgan__dorsal_crop_3D_full__Cerb2_detach_advers_20E_15_DE__vs_17_97_97.err" cerberus_pipline.sbatch "/n/pfister_lab2/Lab/leander/cerberus/slurm_jobs/.default_configs/ccgan__dorsal_crop_3D_full__Cerb2_detach_advers_20E_15_DE__vs_17_97_97.yaml" 
 experiment:
-  name : 'ccgan__dorsal_crop_3D_full__Cerb2__25E_15_DE__vs_17_97_97' 
+  name : 'ccgan__dorsal_crop_3D_full__Cerb2_detach_advers_20E_15_DE__vs_17_97_97' 
   base_dir : '/n/home05/lauenburg/.paths/lab_leander/cerberus/'
   segmenter : 'pytorch_connectomics/'
   slurm : 'slurm_jobs/'
@@ -14,20 +14,20 @@ experiment:
 
 ## Custom CycleGAN configurations
 ccgan:
-  model_name : 'ccgan__dorsal_crop_3D_full__Cerb2__25E_15_DE__vs_17_97_97'
+  model_name : 'ccgan__dorsal_crop_3D_full__Cerb2_detach_advers_20E_15_DE__vs_17_97_97'
   data_root : 'datasets/dorsal_crop_3D_full'
   epochs : '20' 
   epochs_decay : '15'
-  display_server : 'http://holygpu7c1726.rc.fas.harvard.edu' 
-  display_port : '9998'
+  display_server : 'http://holygpu7c1716.rc.fas.harvard.edu' 
+  display_port : '9997'
   display_columns : '10'
-  model_mode: '--cerberus --netG cerberus'
+  model_mode: '--cerberus --netG cerberus --detach_advers --gpu_ids 1,2,3,4,5'
   data_mode: '--dataset_mode cerberus --data_dim 3 --bcd --vs_z 17 --vs_x 97 --vs_y 97'
-  display_train: '--no_html --display_ncols 0 --display_freq 500  --print_freq 100' 
+  display_train: '--no_html --display_ncols 0 --display_freq 500  --print_freq 100 --reduce_visuals' 
   model_mode_train: '--save_epoch_freq 2'
   data_mode_train: '--batch_size 4 --ss_z 1 --ss_x 1 --ss_y 1  '
-  weigths_train: '--lambda_identity 0.5 --cerberus_contour_weight 3  --cerberus_mask_weight 2 --cerberus_distance_weight 2 --cerberus_D_weight_syn 1 --cerberus_D_weight_rec 1 --lambda_B_BCD 2'
-  data_files_train: ' --max_dataset_size 3000 --tif_A_file_name full_volume_em_3D_droped_85_75_80.tif --tif_A_file_name_label full_volume_seg_3D_droped_85_75_80.tif --tif_B_file_name full_volume_em_3D_droped0_0_0_tile_size_17_65_65.tif'
+  weigths_train: '--lambda_identity 0.5 --cerberus_contour_weight 3  --cerberus_mask_weight 2 --cerberus_distance_weight 2 --cerberus_D_weight_syn 2 --lambda_B_BCD 2'
+  data_files_train: ' --max_dataset_size 2000 --tif_A_file_name full_volume_em_3D_droped_85_75_80.tif --tif_A_file_name_label full_volume_seg_3D_droped_85_75_80.tif --tif_B_file_name full_volume_em_3D_droped0_0_0_tile_size_17_65_65.tif'
   data_stride_infer: '--ss_z 8 --ss_x 32 --ss_y 32'
   data_files_infer: ' --max_dataset_size 99999 --tif_A_file_name  full_volume_em_3D_droped_85_75_80.tif --tif_A_file_name_label full_volume_seg_3D_droped_85_75_80.tif --tif_B_file_name full_volume_em_3D_droped0_0_0_tile_size_17_65_65.tif'
   data_vol_save: '--save_vol_A "0110000" --save_vol_B "0110000"'
