@@ -8,16 +8,6 @@ import numpy as np
 
 
 class CycleGANModel(BaseModel):
-    """
-    This class implements the CycleGAN model, for learning image-to-image translation without paired data.
-
-    The model training requires '--dataset_mode unaligned' dataset.
-    By default, it uses a '--netG resnet_9blocks' ResNet generator,
-    a '--netD basic' discriminator (PatchGAN introduced by pix2pix),
-    and a least-square GANs objective ('--gan_mode lsgan').
-
-    CycleGAN paper: https://arxiv.org/pdf/1703.10593.pdf
-    """
     @staticmethod
     def modify_commandline_options(parser, is_train=True):
         """Add new dataset-specific options, and rewrite default values for existing options.
@@ -49,16 +39,14 @@ class CycleGANModel(BaseModel):
             parser.add_argument('--cerberus_mask_weight', type=float, default=1.0, help='weight factor for the segmentation loss')
             parser.add_argument('--cerberus_distance_weight', type=float, default=1.0, help='weight factor for the segmentation loss')
             parser.add_argument('--cerberus_D_weight_syn', type=float, default=1.0, help='weight factor for the adverserial loss, synthesized')
-            parser.add_argument('--cerberus_D_weight_rec', type=float, default=1.0, help='weight factor for the segmentation loss, reconstructed')
+            parser.add_argument('--cerberus_D_weight_rec', type=float, default=1.0, help='weight factor for the adverserial loss, reconstructed')
             parser.add_argument('--lambda_B_BCD', type=float, default=2.0, help='weight for (cycle) loss  A_C ≈ G_A(B_C) with (B,B_M,B_C)-> (A,A_M,A_C) -> (B,B_M,B_C )')
 
         # configure then CycleGAN mode - has to be accessable during training and testing
         parser.add_argument('--cerberus',  action='store_true', help='adds loss based on difference between segmentation and GT mask')
         parser.add_argument('--detach_advers',  action='store_true', help='if set to true creates a version of B_{B,r}, B_{C,r}, B_{D,r} that is detached from G_B and uses them for the pseudo cycle consistency')
         parser.add_argument('--detach_pcycle',  action='store_true', help='if set to true creates a version of B_{B,r}, B_{C,r}, B_{D,r} that is detached from G_B and uses them for the additional adverserial loss')
-        parser.add_argument('--half_advers',  action='store_true', help='if set to true the adverserial loss only uses A_{B,s}, A_{C,s}, A_{D,s} and therefore only updates G_B and not G_A')
-        parser.add_argument('--visualize_dist_map',  action='store_true', help='if set to the network will visualize and save the distnce maps')
-        parser
+        parser.add_argument('--reduce_visuals',  action='store_true', help='only depict real_A, fake_B, real_B, fake_A, seg_syn_mask_A, seg_syn_mask_B, seg_syn_contours_A, seg_syn_contours_B, cerberus_label_mask, cerberus_label_contours')
         return parser
 
     def __init__(self, opt):
@@ -70,61 +58,75 @@ class CycleGANModel(BaseModel):
         BaseModel.__init__(self, opt)
         # specify the training losses you want to print out. The training/test scripts will call <BaseModel.get_current_losses>
         if self.opt.cerberus:
-            self.loss_names = ['D_A', 'G_A', 'cycle_A','idt_A', 'D_B', 'G_B', 'cycle_B', 'idt_B', 'D_B_BCD', 'G_B_BCD_syn', 'cycle_B_BCD', 'seg_syn_logits_mask', 'seg_syn_logits_contour', 'seg_rec_logits_mask', 'seg_rec_logits_contour']
-            if not self.opt.half_advers:
-                self.loss_names = self.loss_names + ['G_B_BCD_rec']
+            self.loss_names = ['D_A', 'G_A', 'cycle_A','idt_A', 'D_B', 'G_B', 'cycle_B', 'idt_B', 'seg_syn_logits_mask', 'seg_syn_logits_contour', 'seg_rec_logits_mask', 'seg_rec_logits_contour']
+            # add the weights for the distance map pseudo cycle consistency if bcd is True
             if self.opt.bcd:
               self.loss_names = self.loss_names +  ["seg_syn_logits_distance", "seg_rec_logits_distance"]
+            # only add the following losses in case their accociated weight is greater zero
+            if self.isTrain:
+                if self.opt.cerberus_D_weight_syn > 0:
+                    self.loss_names = self.loss_names + ['G_B_BCD_syn']
+                if self.opt.cerberus_D_weight_rec > 0:
+                    self.loss_names = self.loss_names + ['G_B_BCD_rec']
+                if self.opt.cerberus_D_weight_rec > 0.0 or self.opt.detach_advers:
+                    self.loss_names = self.loss_names + ['D_B_BCD']
+                if self.opt.lambda_B_BCD > 0.0:
+                    self.loss_names = self.loss_names + ['cycle_B_BCD']
         else:
+            # default losses
             self.loss_names = ['D_A', 'G_A', 'cycle_A','idt_A', 'D_B', 'G_B', 'cycle_B', 'idt_B']
         
         # specify the images you want to save/display. The training/test scripts will call <BaseModel.get_current_visuals>
-        visual_names_A = ['real_A', 'fake_B', 'rec_A']
-        visual_names_B = ['real_B', 'fake_A', 'rec_B']
-        if self.isTrain and self.opt.lambda_identity > 0.0:  # if identity loss is used, we also visualize idt_B=G_A(B) ad idt_A=G_A(B)
-            visual_names_A.append('idt_B')
-            visual_names_B.append('idt_A')
+        if not self.opt.reduce_visuals:
+            visual_names_A = ['real_A', 'fake_B', 'rec_A']
+            visual_names_B = ['real_B', 'fake_A', 'rec_B']
+        else:
+            visual_names_A = ['real_A', 'fake_B']
+            visual_names_B = ['real_B', 'fake_A']
+        
+        if not self.opt.reduce_visuals:
+            if self.isTrain and self.opt.lambda_identity > 0.0:  # if identity loss is used, we also visualize idt_B=G_A(B) ad idt_A=G_A(B)
+                visual_names_A.append('idt_B')
+                visual_names_B.append('idt_A')
 
         if self.opt.cerberus:
-            # all masks and contours that belong to A (seg_syn_mask_A, seg_syn_contours_A, seg_rec_mask_A, seg_rec_contours_A)
-            # are added to the visualization of A also the recration got created by G_B
-            # same holds for B just the other way around
+            # adding the label components to the visualization
             visual_names_A.append('seg_syn_mask_A')
             visual_names_B.append('seg_syn_mask_B')
 
             visual_names_A.append('seg_syn_contours_A')
             visual_names_B.append('seg_syn_contours_B')
 
-            visual_names_A.append('seg_rec_mask_A')
-            if self.opt.detach_advers and self.opt.detach_pcycle:
-                visual_names_B.append('seg_rec_mask_B_detached')
-            else:
-                visual_names_B.append('seg_rec_mask_B')
-
-            visual_names_A.append('seg_rec_contours_A')           
-            if self.opt.detach_advers and self.opt.detach_pcycle:
-                visual_names_B.append('seg_rec_contours_B_detached')  
-            else:
-                visual_names_B.append('seg_rec_contours_B')  
-
-            if self.opt.bcd:
-                visual_names_B.append('seg_syn_distance_B')
-                visual_names_A.append('seg_syn_distance_A')   
+            if not self.opt.reduce_visuals:
+                visual_names_A.append('seg_rec_mask_A')            
                 if self.opt.detach_advers and self.opt.detach_pcycle:
-                    visual_names_A.append('seg_rec_distance_B_detached')     
+                    visual_names_B.append('seg_rec_mask_B_detached')
                 else:
-                    visual_names_A.append('seg_rec_distance_B')     
-                visual_names_A.append('seg_rec_distance_A')          
+                    visual_names_B.append('seg_rec_mask_B')
+            
+            if not self.opt.reduce_visuals:
+                visual_names_A.append('seg_rec_contours_A')           
+                if self.opt.detach_advers and self.opt.detach_pcycle:
+                    visual_names_B.append('seg_rec_contours_B_detached')  
+                else:
+                    visual_names_B.append('seg_rec_contours_B')  
+
+            if not self.opt.reduce_visuals:
+                if self.opt.bcd:
+                    visual_names_B.append('seg_syn_distance_B')
+                    visual_names_A.append('seg_syn_distance_A')   
+                    if self.opt.detach_advers and self.opt.detach_pcycle:
+                        visual_names_A.append('seg_rec_distance_B_detached')     
+                    else:
+                        visual_names_A.append('seg_rec_distance_B')     
+                    visual_names_A.append('seg_rec_distance_A')          
 
             if self.isTrain:
                 visual_names_B.append('cerberus_label_mask')
                 visual_names_B.append('cerberus_label_contours')  
-                if self.opt.bcd:
+                if self.opt.bcd and not self.opt.reduce_visuals:
                     visual_names_B.append('cerberus_label_distance') 
                       
-
-
-
         self.visual_names = visual_names_A + visual_names_B  # combine visualizations for A and B
 
         # added by leander
@@ -157,12 +159,13 @@ class CycleGANModel(BaseModel):
             # added by Leander
             if self.opt.cerberus:
                 # discriminator used to evaluate the masks, contour, and distance map generated from real B and reconstructed from fake_A
-                if self.opt.bcd:
-                    self.netD_B_BCD = networks.define_D(3, opt.ndf, opt.netD,
-                                                    opt.n_layers_D, opt.norm, opt.init_type, opt.init_gain, self.gpu_ids, opt=self.opt)
-                else:
-                    self.netD_B_BCD = networks.define_D(2, opt.ndf, opt.netD,
-                                                    opt.n_layers_D, opt.norm, opt.init_type, opt.init_gain, self.gpu_ids, opt=self.opt)
+                if self.opt.cerberus_D_weight_rec > 0.0 or self.opt.cerberus_D_weight_syn > 0.0: 
+                    if self.opt.bcd:
+                        self.netD_B_BCD = networks.define_D(3, opt.ndf, opt.netD,
+                                                        opt.n_layers_D, opt.norm, opt.init_type, opt.init_gain, self.gpu_ids, opt=self.opt)
+                    else:
+                        self.netD_B_BCD = networks.define_D(2, opt.ndf, opt.netD,
+                                                        opt.n_layers_D, opt.norm, opt.init_type, opt.init_gain, self.gpu_ids, opt=self.opt)
         if self.isTrain:
             if self.opt.lambda_identity > 0.0:  # only works when input and output images have the same number of channels
                 if self.opt.cerberus:
@@ -174,8 +177,9 @@ class CycleGANModel(BaseModel):
             # added by Leander
             if self.opt.cerberus:
                 self.real_GT_M_pool = ImagePool(opt.pool_size)
-                self.fake_B_BCD_syn_pool = ImagePool(opt.pool_size)
-                if not self.opt.half_advers: 
+                if self.opt.cerberus_D_weight_syn > 0.0: 
+                    self.fake_B_BCD_syn_pool = ImagePool(opt.pool_size)
+                if self.opt.cerberus_D_weight_rec > 0.0: 
                     self.fake_B_BCD_rec_pool = ImagePool(opt.pool_size)
             # define loss functions
             self.criterionGAN = networks.GANLoss(opt.gan_mode).to(self.device)  # define GAN loss.
@@ -200,11 +204,15 @@ class CycleGANModel(BaseModel):
             self.optimizers.append(self.optimizer_D)
             
             if self.opt.cerberus:
-                self.optimizer_D_BCD = torch.optim.Adam(itertools.chain(self.netD_B_BCD.parameters()), lr=opt.lr, betas=(opt.beta1, 0.999))
-                self.optimizers.append(self.optimizer_D_BCD)
+                if self.opt.cerberus_D_weight_rec > 0.0 or self.opt.cerberus_D_weight_syn > 0.0: 
+                    self.optimizer_D_BCD = torch.optim.Adam(itertools.chain(self.netD_B_BCD.parameters()), lr=opt.lr, betas=(opt.beta1, 0.999))
+                    self.optimizers.append(self.optimizer_D_BCD)
 
-        if self.opt.half_advers and self.opt.detach_advers:
-            ConfigException("These configurations do not match", f"If opt.half_advers is {self.opt.half_advers} there is no point in setting opt.detach_advers to {self.opt.detach_advers} as S_{{B,r}} is never used")
+        if self.isTrain:
+            if self.opt.cerberus_D_weight_rec == 0.0 and self.opt.detach_advers:
+                ConfigException("These configurations do not match", f"If opt.cerberus_D_weight_rec is {self.opt.cerberus_D_weight_rec} there is no point in setting opt.detach_advers to {self.opt.detach_advers} since S_{{B,r}} is never used by the discriminator")
+            if self.opt.lambda_B_BCD == 0.0 and self.opt.detach_pcycle:
+                ConfigException("These configurations do not match", f"If opt.lambda_B_BCD is {self.opt.lambda_B_BCD} there is no point in setting opt.detach_pcycle to {self.opt.detach_pcycle} since S_{{B,r}} is never used by the pseudo cycle loss")
 
 
     def set_input(self, input):
@@ -220,12 +228,16 @@ class CycleGANModel(BaseModel):
         self.real_B = input['B' if AtoB else 'A'].to(self.device)
     
         if self.opt.cerberus:
+            # the pose is only used by the testing function to label the output volumes
             self.pos_A = input['A_pos']
             self.pos_B = input['B_pos']
+
+            # process the label components
             if self.isTrain:
                 self.cerberus_label = input['Label'].to(self.device)
                 self.cerberus_label_mask = self.cerberus_label[:,:1,:,:,:]
                 self.cerberus_label_contours = self.cerberus_label[:,1:2,:,:,:]
+
                 if self.cerberus_label.shape[1]==3 and self.opt.bcd:
                     self.cerberus_label_distance = self.cerberus_label[:,2:3,:,:,:]
                 elif self.cerberus_label.shape[1]==3 and not self.opt.bcd:
@@ -391,27 +403,35 @@ class CycleGANModel(BaseModel):
 
         # merge the processed mask, contours, and distance map
         if  self.opt.bcd:
-            concat_label_syn = torch.cat((self.seg_syn_mask_B, self.seg_syn_contours_B, self.seg_syn_distance_B), axis=1)
-            if not self.opt.half_advers:
+            if self.opt.cerberus_D_weight_syn > 0.0: 
+                    concat_label_syn = torch.cat((self.seg_syn_mask_B, self.seg_syn_contours_B, self.seg_syn_distance_B), axis=1)
+            if self.opt.cerberus_D_weight_rec > 0.0:
                 if self.opt.detach_advers:
                     concat_label_rec = torch.cat((self.seg_rec_mask_B_detached, self.seg_rec_contours_B_detached, self.seg_rec_distance_B_detached), axis=1)
                 else:
                     concat_label_rec = torch.cat((self.seg_rec_mask_B, self.seg_rec_contours_B, self.seg_rec_distance_B), axis=1)
         else:
-            concat_label_syn = torch.cat((self.seg_syn_mask_B, self.seg_syn_contours_B), axis=1)
-            if not self.opt.half_advers:
+            if self.opt.cerberus_D_weight_syn > 0.0: 
+                concat_label_syn = torch.cat((self.seg_syn_mask_B, self.seg_syn_contours_B), axis=1)
+            if self.opt.cerberus_D_weight_rec > 0.0:
                 if self.opt.detach_advers:
                     concat_label_rec = torch.cat((self.seg_rec_mask_B_detached, self.seg_rec_contours_B_detached), axis=1)
                 else:
                     concat_label_rec = torch.cat((self.seg_rec_mask_B, self.seg_rec_contours_B), axis=1)
         
-        if not self.opt.half_advers: 
+        if self.opt.cerberus_D_weight_rec > 0.0 and self.opt.cerberus_D_weight_syn > 0.0: 
             fake_B_BCD_syn = self.fake_B_BCD_syn_pool.query(concat_label_syn)
             fake_B_BCD_rec = self.fake_B_BCD_rec_pool.query(concat_label_rec)
             self.loss_D_B_BCD = self.backward_D_basic(self.netD_B_BCD, real_GT_M, fake_B_BCD_syn, fake_B_BCD_rec)
-        else:
+        elif self.opt.cerberus_D_weight_syn > 0.0:
             fake_B_BCD_syn = self.fake_B_BCD_syn_pool.query(concat_label_syn)
             self.loss_D_B_BCD = self.backward_D_basic(self.netD_B_BCD, real_GT_M, fake_B_BCD_syn)
+        elif self.opt.cerberus_D_weight_rec > 0.0:
+            fake_B_BCD_rec = self.fake_B_BCD_rec_pool.query(concat_label_rec)
+            self.loss_D_B_BCD = self.backward_D_basic(self.netD_B_BCD, real_GT_M, fake_B_BCD_rec)
+        else:
+            ConfigException("These configurations do not match", f"Why is D_B_BCD used if opt.cerberus_D_weight_rec is {self.opt.cerberus_D_weight_rec} and opt.cerberus_D_weight_syn is {self.opt.cerberus_D_weight_syn}?")
+        
 
     def backward_G(self):
         """Calculate the loss for generators G_A and G_B"""
@@ -421,18 +441,20 @@ class CycleGANModel(BaseModel):
         # Identity loss
         if lambda_idt > 0:
             # G_A should be identity if real_B is fed: ||G_A(B) - B||
+            # G_B and G_A do not have a tanh output due to the multi channel nature of the data   
+            # real_B is normalized between -1 and 1
             if self.opt.cerberus:
-                self.idt_A = self.netG_A(self.real_B)[:,:1,:,:,:]
+                self.idt_A = torch.tanh(self.netG_A(self.real_B)[:,:1,:,:,:])
             else:
                 self.idt_A = self.netG_A(self.real_B)
-            
             self.loss_idt_A = self.criterionIdt(self.idt_A, self.real_B) * lambda_B * lambda_idt
+
             # G_B should be identity if real_A is fed: ||G_B(A) - A||
             if self.opt.cerberus:
-                self.idt_B = self.netG_B(self.real_A)[:,:1,:,:,:]
+                self.idt_B = torch.tanh(self.netG_B(self.real_A)[:,:1,:,:,:])
             else:
                 self.idt_B = self.netG_B(self.real_A)
-            self.loss_idt_B = self.criterionIdt(self.idt_B, self.real_A) * lambda_B * lambda_idt
+            self.loss_idt_B = self.criterionIdt(self.idt_B, self.real_A) * lambda_A * lambda_idt
 
         else:
             self.loss_idt_A = 0
@@ -467,20 +489,21 @@ class CycleGANModel(BaseModel):
 
             # (Pseudo-Cycle) Consistency loss: A_C ≈ G_A(B_C)
             lambda_B_BCD = self.opt.lambda_B_BCD
-            if self.opt.bcd:
-                if self.opt.detach_pcycle:
-                    self.loss_cycle_B_BCD = self.criterionPseudoCycle(torch.cat((self.seg_syn_mask_B, self.seg_syn_contours_B, self.seg_syn_distance_B), axis=1), 
-                                        torch.cat((self.seg_rec_mask_B_detached, self.seg_rec_contours_B_detached, self.seg_rec_distance_B_detached), axis=1)) * lambda_B_BCD          
+            if lambda_B_BCD > 0.0:
+                if self.opt.bcd:
+                    if self.opt.detach_pcycle:
+                        self.loss_cycle_B_BCD = self.criterionPseudoCycle(torch.cat((self.seg_syn_mask_B, self.seg_syn_contours_B, self.seg_syn_distance_B), axis=1), 
+                                            torch.cat((self.seg_rec_mask_B_detached, self.seg_rec_contours_B_detached, self.seg_rec_distance_B_detached), axis=1)) * lambda_B_BCD          
+                    else:
+                        self.loss_cycle_B_BCD = self.criterionPseudoCycle(torch.cat((self.seg_syn_mask_B, self.seg_syn_contours_B, self.seg_syn_distance_B), axis=1), 
+                                            torch.cat((self.seg_rec_mask_B, self.seg_rec_contours_B, self.seg_rec_distance_B), axis=1)) * lambda_B_BCD
                 else:
-                    self.loss_cycle_B_BCD = self.criterionPseudoCycle(torch.cat((self.seg_syn_mask_B, self.seg_syn_contours_B, self.seg_syn_distance_B), axis=1), 
-                                        torch.cat((self.seg_rec_mask_B, self.seg_rec_contours_B, self.seg_rec_distance_B), axis=1)) * lambda_B_BCD
-            else:
-                if self.opt.detach_pcycle:
-                    self.loss_cycle_B_BCD = self.criterionPseudoCycle(torch.cat((self.seg_syn_mask_B, self.seg_syn_contours_B), axis=1), 
-                                        torch.cat((self.seg_rec_mask_B_detached, self.seg_rec_contours_B_detached), axis=1)) * lambda_B_BCD
-                else:
-                    self.loss_cycle_B_BCD = self.criterionPseudoCycle(torch.cat((self.seg_syn_mask_B, self.seg_syn_contours_B), axis=1), 
-                                        torch.cat((self.seg_rec_mask_B_detached, self.seg_rec_contours_B_detached), axis=1)) * lambda_B_BCD
+                    if self.opt.detach_pcycle:
+                        self.loss_cycle_B_BCD = self.criterionPseudoCycle(torch.cat((self.seg_syn_mask_B, self.seg_syn_contours_B), axis=1), 
+                                            torch.cat((self.seg_rec_mask_B_detached, self.seg_rec_contours_B_detached), axis=1)) * lambda_B_BCD
+                    else:
+                        self.loss_cycle_B_BCD = self.criterionPseudoCycle(torch.cat((self.seg_syn_mask_B, self.seg_syn_contours_B), axis=1), 
+                                            torch.cat((self.seg_rec_mask_B, self.seg_rec_contours_B), axis=1)) * lambda_B_BCD
                 
         # GAN loss D_A(G_A(A))
         self.loss_G_A = self.criterionGAN(self.netD_A(self.fake_B), True)
@@ -491,17 +514,19 @@ class CycleGANModel(BaseModel):
             # added by leander
             # GAN loss D_B_BCD(G_B(B))
             if self.opt.bcd:
-                self.loss_G_B_BCD_syn = self.criterionGAN(self.netD_B_BCD(torch.cat((self.seg_syn_mask_B, self.seg_syn_contours_B, self.seg_syn_distance_B), axis=1)), True) * self.opt.cerberus_D_weight_syn
+                if self.opt.cerberus_D_weight_syn > 0.0:
+                    self.loss_G_B_BCD_syn = self.criterionGAN(self.netD_B_BCD(torch.cat((self.seg_syn_mask_B, self.seg_syn_contours_B, self.seg_syn_distance_B), axis=1)), True) * self.opt.cerberus_D_weight_syn
                 # also update G_A by applying the discriminator also to S_{B,r}
-                if not self.opt.half_advers:
+                if self.opt.cerberus_D_weight_rec > 0.0:
                     if self.opt.detach_advers:
                         self.loss_G_B_BCD_rec = self.criterionGAN(self.netD_B_BCD(torch.cat((self.seg_rec_mask_B_detached, self.seg_rec_contours_B_detached, self.seg_rec_distance_B_detached), axis=1)), True) * self.opt.cerberus_D_weight_rec
                     else:
                         self.loss_G_B_BCD_rec = self.criterionGAN(self.netD_B_BCD(torch.cat((self.seg_rec_mask_B, self.seg_rec_contours_B, self.seg_rec_distance_B), axis=1)), True) * self.opt.cerberus_D_weight_rec
             else:
-                self.loss_G_B_BCD_syn = self.criterionGAN(self.netD_B_BCD(torch.cat((self.seg_syn_mask_B, self.seg_syn_contours_B), axis=1)), True) * self.opt.cerberus_D_weight_syn
+                if self.opt.cerberus_D_weight_syn > 0.0:
+                    self.loss_G_B_BCD_syn = self.criterionGAN(self.netD_B_BCD(torch.cat((self.seg_syn_mask_B, self.seg_syn_contours_B), axis=1)), True) * self.opt.cerberus_D_weight_syn
                  # also update G_A by applying the discriminator also to S_{B,r}
-                if not self.opt.half_advers:
+                if self.opt.cerberus_D_weight_rec > 0.0:
                     if self.opt.detach_advers:
                         self.loss_G_B_BCD_rec = self.criterionGAN(self.netD_B_BCD(torch.cat((self.seg_rec_mask_B_detached, self.seg_rec_contours_B_detached), axis=1)), True) * self.opt.cerberus_D_weight_rec
                     else:
@@ -514,13 +539,16 @@ class CycleGANModel(BaseModel):
             # add the mask and contour losses for the A->B->A loop
             cerberus_loss = self.loss_seg_syn_logits_mask + self.loss_seg_syn_logits_contour + self.loss_seg_rec_logits_mask + self.loss_seg_rec_logits_contour
             # add the adverserial losses
-            if not self.opt.half_advers:
-                cerberus_loss = cerberus_loss + (self.loss_G_B_BCD_syn + self.loss_G_B_BCD_rec)
-            else:
+            if self.opt.cerberus_D_weight_syn > 0.0:
                 cerberus_loss = cerberus_loss + self.loss_G_B_BCD_syn
+            if self.opt.cerberus_D_weight_rec > 0.0:
+                cerberus_loss = cerberus_loss + self.loss_G_B_BCD_rec
+            if lambda_B_BCD > 0.0:
+                cerberus_loss = cerberus_loss + self.loss_cycle_B_BCD
+            # add the distance based losses for the A->B->A loop
             if self.opt.bcd:
-                # add the distance based losses for the A->B->A loop
                 cerberus_loss = cerberus_loss + self.loss_seg_syn_logits_distance + self.loss_seg_rec_logits_distance
+
             self.loss_G = cerberus_loss + self.loss_G_A + self.loss_G_B + self.loss_cycle_A + self.loss_cycle_B + self.loss_idt_A + self.loss_idt_B
         else:
             self.loss_G = self.loss_G_A + self.loss_G_B + self.loss_cycle_A + self.loss_cycle_B + self.loss_idt_A + self.loss_idt_B
@@ -545,7 +573,8 @@ class CycleGANModel(BaseModel):
         
         # added by Leander
         # D_B_BCD
-        self.set_requires_grad([self.netD_B_BCD], True)
-        self.optimizer_D_BCD.zero_grad()   # set D_A and D_B's gradients to zero
-        self.backward_D_B_BCD()      # calculate graidents for D_B
-        self.optimizer_D_BCD.step()  # update D_A and D_B's weights
+        if self.opt.cerberus_D_weight_rec > 0.0 or self.opt.cerberus_D_weight_syn > 0.0: 
+            self.set_requires_grad([self.netD_B_BCD], True)
+            self.optimizer_D_BCD.zero_grad()   # set D_A and D_B's gradients to zero
+            self.backward_D_B_BCD()      # calculate graidents for D_B
+            self.optimizer_D_BCD.step()  # update D_A and D_B's weights
