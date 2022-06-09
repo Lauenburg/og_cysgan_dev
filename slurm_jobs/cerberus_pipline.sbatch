@@ -2,7 +2,7 @@
 #SBATCH -c 4                 # Number of cores (-c)
 #SBATCH -t 0-14:00           # Runtime in D-HH:MM, minimum of 10 minutes
 #SBATCH -p cox               # Partition to submit to
-#SBATCH --gres=gpu:6	     # Request a gpu -> do NOT set to zero or scripts will fail
+#SBATCH --gres=gpu:7	     # Request a gpu -> do NOT set to zero or scripts will fail
 #SBATCH --mem=200000         # Memory pool for all cores (see also --mem-per-cpu)
 #SBATCH -o ./slurm_out/pipline_output.out  # File to which STDOUT will be written - add %j to the name to include the jobid
 #SBATCH -e ./slurm_err/pipline_errors.err  # File to which STDERR will be written - add %j to the name to include the jobid
@@ -46,6 +46,7 @@ echo ""
 echo "==========DEPENDENCIES========="
 
 echo "Install cuda and python modules"
+
 module load cuda/11.1.0-fasrc0 cudnn/8.0.4.30_cuda11.1-fasrc01
 module load python/3.8.5-fasrc01
 module load GCC/8.2.0-2.31.1
@@ -62,7 +63,9 @@ if [ ${experiment_install:-"0"} == "0" ]
 then
 conda create -n py3_torch python=3.8
 source activate py3_torch
+
 conda install pytorch torchvision cudatoolkit=11.1 -c pytorch -c nvidia
+
 
 echo "Installing pytorch_connectomics"
 pip install --upgrade pip

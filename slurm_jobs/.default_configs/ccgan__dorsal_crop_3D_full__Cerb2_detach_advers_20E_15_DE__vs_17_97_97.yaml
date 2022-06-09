@@ -21,7 +21,7 @@ ccgan:
   display_server : 'http://holygpu7c1716.rc.fas.harvard.edu' 
   display_port : '9997'
   display_columns : '10'
-  model_mode: '--cerberus --netG cerberus --detach_advers --gpu_ids 1,2,3,4,5'
+  model_mode: '--cerberus --netG cerberus --detach_advers --cerberus_D_weight_rec 0 --lambda_B_BCD 0'
   data_mode: '--dataset_mode cerberus --data_dim 3 --bcd --vs_z 17 --vs_x 97 --vs_y 97'
   display_train: '--no_html --display_ncols 0 --display_freq 500  --print_freq 100 --reduce_visuals' 
   model_mode_train: '--save_epoch_freq 2'

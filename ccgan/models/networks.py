@@ -4,7 +4,8 @@ from torch.nn import init
 import functools
 from torch.optim import lr_scheduler
 import torch.nn.functional as F
-from connectomics.model.arch import unet
+from connectomics.model.arch import unet, UNetPlus3D
+from connectomics.model.arch import Discriminator3D
 
 
 
@@ -154,7 +155,17 @@ def define_G(input_nc, output_nc, ngf, netG, norm='batch', use_dropout=False, in
 
     The generator has been initialized by <init_net>. It uses RELU for non-linearity.
     """
-    if netG == 'cerberus':
+    if netG == 'UNetPlus3D':
+        if opt.data_dim == 2:
+            raise NotImplementedError("For 3D volume data you have to use Resnet or unet_32")
+        elif opt.data_dim == 3:
+            if opt.bcd:
+                # image, mask, contour, distance map
+                net = unet.UNetPlus3D(in_channel=1, out_channel=4, block_type='residual_se', filters=[32, 64, 96, 128, 160], norm_mode='gn')
+            else:
+                # image, mask, contour
+                net = unet.UNetPlus3D(in_channel=1, out_channel=3, block_type='residual_se', filters=[32, 64, 96, 128, 160], norm_mode='gn')
+    elif netG == 'UNet3D':
         if opt.data_dim == 2:
             raise NotImplementedError("For 3D volume data you have to use Resnet or unet_32")
         elif opt.data_dim == 3:
@@ -206,11 +217,11 @@ def define_D(input_nc, ndf, netD, n_layers_D=3, norm='batch', init_type='normal'
         elif opt.data_dim == 3:
             net = NLayerDiscriminator3D(input_nc, ndf, n_layers=3, norm_layer=norm_layer)
             pass
-    elif netD == 'n_layers':  # more options
+    elif netD == 'Discriminator3D':  # zudi's dicriminator
         if opt.data_dim == 2:
             NotImplementedError('This implentation does not include a 2D discreminator')
         elif opt.data_dim == 3:
-            net = NLayerDiscriminator3D(input_nc, ndf, n_layers=3, norm_layer=norm_layer)
+            net = Discriminator3D(input_nc)
             pass
     else:
         raise NotImplementedError('Discriminator model name [%s] is not recognized' % netD)

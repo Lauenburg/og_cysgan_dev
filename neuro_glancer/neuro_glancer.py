@@ -3,6 +3,7 @@ import numpy as np
 import imageio
 import h5py
 import argparse
+import tifffile
 
 # EM data
 #seg_paths="/n/pfister_lab2/Lab/leander/em2exm/img_toolbox/em_seg_dorsal_crop_volume_infer_dense.h5"
@@ -36,23 +37,29 @@ if __name__=='__main__':
     ip = 'localhost' #or public IP of the machine for sharable display
     port = args.port #change to an unused port number
     neuroglancer.set_server_bind_address(bind_address=ip,bind_port=port)
-    viewer=neuroglancer.Viewer()
+    viewer=neuroglancer.Viewer(token='MyToken')
 
     res = neuroglancer.CoordinateSpace(
         names=['z', 'y', 'x'],
         units=['nm', 'nm', 'nm'],
         scales=[1000, 333, 333])
 
-    def load_data(filename, dtype):
-        f = h5py.File(filename, 'r')
-        data = np.array(f['main']).astype(dtype)
-        f.close()
-        print(filename, data.shape, data.shape)
+    def load_data(filename, dtype, object='main'):
+        if filename.split(".")[-1] == "h5":
+            f = h5py.File(filename, 'r')
+            data = np.array(f[object]).astype(dtype)#[2,:,:,:]
+            f.close()
+            print(filename, data.shape, data.shape)
+        elif filename.split(".")[-1] == "tif":
+            f = tifffile.TiffFile(filename)
+            data = np.asarray([img.asarray() for img in f.pages[:]])
+        else:
+            raise TypeError("The file ending must either be h5 or tif")
         return data
 
     print('load im and gt segmentation')
-    im = load_data(args.imgs, np.uint8)
-    gt = load_data(args.segs, np.uint32)
+    im = load_data(args.imgs, np.uint8, object='main')
+    gt = load_data(args.segs, np.uint32, object='main')
 
     # show half of the segmentation indices
     indices = np.unique(gt)[1:]

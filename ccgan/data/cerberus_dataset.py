@@ -12,6 +12,7 @@ import torchio as tio
 import csv
 
 from connectomics.data.utils import *
+from connectomics.data.augmentation import Compose
 
 
 class CerberusDataset(BaseDataset):
@@ -53,7 +54,7 @@ class CerberusDataset(BaseDataset):
         parser.add_argument('--tif_A_file_name', type=str, required=True, help='name of the tiff file for the data of domain A')
         parser.add_argument('--tif_A_file_name_label', type=str, required=True, help='name of the tiff label file for the data of domain A')
         parser.add_argument('--tif_B_file_name', type=str, required=True, help='name of the tiff file for the data of domain B')
-
+        parser.add_argument('--augmentation', action='store_true', help='if set augmentation will be applied to the data and label' )
         parser.set_defaults(max_dataset_size=1000, new_dataset_option=2.0)  # specify dataset-specific default values
         return parser
 
@@ -67,13 +68,20 @@ class CerberusDataset(BaseDataset):
         BaseDataset.__init__(self, opt)
 
         self.opt = opt # experiment options
-        self.sample_volume_size = (opt.vs_z, opt.vs_x, opt.vs_y) # size for the image subvolumes
+        if self.opt.augmentation:
+            self.sample_volume_size = (17, 123, 123)
+        else:
+            self.sample_volume_size = (opt.vs_z, opt.vs_x, opt.vs_y) # size for the image subvolumes
         self.sample_label_size = (opt.vs_z, opt.vs_x, opt.vs_y) # size for the label subvolumes
         self.sample_stride = (opt.ss_z,opt.ss_x,opt.ss_y) # stride size
 
         self.mode = self.opt.phase # mode: train | test
         assert self.mode in ['train', 'test']
 
+        if self.opt.augmentation:
+            self.augmentor = Compose(input_size=(opt.vs_z, opt.vs_x, opt.vs_y))
+        else:
+            self.augmentor = None
 
         # setting contour dilation to two since contours of thickness one are to thin for the L1 loss 
         if self.opt.bcd:
@@ -144,6 +152,9 @@ class CerberusDataset(BaseDataset):
             self.sample_label_size = np.array(
                 self.sample_label_size).astype(int)  # model label size
             self.label_vol_ratio = self.sample_label_size / self.sample_volume_size
+            if self.augmentor is not None:
+                assert np.array_equal(
+                    self.augmentor.sample_size, self.sample_label_size)
            
         # assert the subvolume sizes are not larger then the volume sizes
         self._assert_valid_shape()
@@ -205,7 +216,16 @@ class CerberusDataset(BaseDataset):
 
             # random sample the sub-volume A
             pos_A, out_volume_A, out_label = self._random_sampling(vol_size, "A")
-            
+
+            # apply augmentation
+            if self.augmentor is not None:
+                data = {'image': out_volume_A,
+                        'label': out_label,
+                        'valid_mask': None}
+
+                augmented = self.augmentor(data)
+                out_volume_A, out_label = augmented['image'], augmented['label']
+                
             # normalize the image sub-volume to -1 to 1 and convert to float32 
             out_volume_A = self._normalize(out_volume_A)
             
@@ -215,6 +235,16 @@ class CerberusDataset(BaseDataset):
 
             # random sample the sub-volume A - we only have labels for A
             pos_B, out_volume_B, _  = self._random_sampling(vol_size, "B")
+
+            # apply augmentation
+            if self.augmentor is not None:
+                data = {'image': out_volume_B,
+                        'label': None,
+                        'valid_mask': None}
+
+                augmented = self.augmentor(data)
+                out_volume_B = augmented['image']
+
             out_volume_B = self._normalize(out_volume_B)
 
             # assert normalizations

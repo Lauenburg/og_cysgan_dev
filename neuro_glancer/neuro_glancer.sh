@@ -19,8 +19,8 @@ echo "Install necessary modlues"
 module load Anaconda3/2020.11
 source ~/.bashrc
 
-#conda create -n py3_torch python=3.8
-source activate py3_torch
+conda create -n neuro python=3.8
+source activate neuro
 conda install pytorch torchvision cudatoolkit=11.0 -c pytorch
 
 pip install --upgrade pip

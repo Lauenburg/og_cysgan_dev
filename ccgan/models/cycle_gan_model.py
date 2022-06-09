@@ -46,6 +46,7 @@ class CycleGANModel(BaseModel):
         parser.add_argument('--cerberus',  action='store_true', help='adds loss based on difference between segmentation and GT mask')
         parser.add_argument('--detach_advers',  action='store_true', help='if set to true creates a version of B_{B,r}, B_{C,r}, B_{D,r} that is detached from G_B and uses them for the pseudo cycle consistency')
         parser.add_argument('--detach_pcycle',  action='store_true', help='if set to true creates a version of B_{B,r}, B_{C,r}, B_{D,r} that is detached from G_B and uses them for the additional adverserial loss')
+        parser.add_argument('--detach_seg',  action='store_true', help='if set to true creates a version of A_{B,r}, A_{C,r}, A_{D,r} that is detached from G_A and uses them for the segmentation loss')
         parser.add_argument('--reduce_visuals',  action='store_true', help='only depict real_A, fake_B, real_B, fake_A, seg_syn_mask_A, seg_syn_mask_B, seg_syn_contours_A, seg_syn_contours_B, cerberus_label_mask, cerberus_label_contours')
         return parser
 
@@ -58,10 +59,16 @@ class CycleGANModel(BaseModel):
         BaseModel.__init__(self, opt)
         # specify the training losses you want to print out. The training/test scripts will call <BaseModel.get_current_losses>
         if self.opt.cerberus:
-            self.loss_names = ['D_A', 'G_A', 'cycle_A','idt_A', 'D_B', 'G_B', 'cycle_B', 'idt_B', 'seg_syn_logits_mask', 'seg_syn_logits_contour', 'seg_rec_logits_mask', 'seg_rec_logits_contour']
-            # add the weights for the distance map pseudo cycle consistency if bcd is True
-            if self.opt.bcd:
-              self.loss_names = self.loss_names +  ["seg_syn_logits_distance", "seg_rec_logits_distance"]
+            if self.opt.detach_seg:
+                self.loss_names = ['D_A', 'G_A', 'cycle_A','idt_A', 'D_B', 'G_B', 'cycle_B', 'idt_B', 'seg_syn_logits_mask', 'seg_syn_logits_contour', 'seg_rec_logits_mask_detached', 'seg_rec_logits_contour_detached']
+                # add the weights for the distance map pseudo cycle consistency if bcd is True
+                if self.opt.bcd:
+                    self.loss_names = self.loss_names +  ["seg_syn_logits_distance", "seg_rec_logits_distance_detached"]
+            else:
+                self.loss_names = ['D_A', 'G_A', 'cycle_A','idt_A', 'D_B', 'G_B', 'cycle_B', 'idt_B', 'seg_syn_logits_mask', 'seg_syn_logits_contour', 'seg_rec_logits_mask', 'seg_rec_logits_contour']
+                # add the weights for the distance map pseudo cycle consistency if bcd is True
+                if self.opt.bcd:
+                    self.loss_names = self.loss_names +  ["seg_syn_logits_distance", "seg_rec_logits_distance"]            
             # only add the following losses in case their accociated weight is greater zero
             if self.isTrain:
                 if self.opt.cerberus_D_weight_syn > 0:
@@ -257,6 +264,14 @@ class CycleGANModel(BaseModel):
             # the model expects input that is normalized between -1 and 1
             # G_B and G_A do not have a tanh output due to the multi channel nature of the data
             self.rec_A = self.netG_B(torch.tanh(self.fake_B[:,:1,:,:,:]))   # G_B(G_A(A)) = A_rec
+
+            if self.opt.detach_seg:
+                # detach version so that D_B_BCD can be used to update G_A with out updating G_B
+                # only feed the image and not the label components to the G_A
+                # the model expects input that is normalized between -1 and 1 
+                # G_B and G_A do not have a tanh output due to the multi channel nature of the data
+                self.fake_B_detached = self.fake_B[:,:1,:,:,:].detach().clone()
+                self.rec_A_detached = self.netG_B(torch.tanh(self.fake_B_detached))  # G_A(G_B(B)) = B_rec_detached
         else:
             # backward pass B_syn -> A_rec
             self.rec_A = self.netG_B(self.fake_B)   # G_B(G_A(A))
@@ -300,6 +315,12 @@ class CycleGANModel(BaseModel):
                 self.seg_rec_distance_A = torch.tanh(self.rec_A[:,3:4,:,:,:]) # normalize with tanh as we us an L1 loss
             # rec_A is used to ensure cycle consistency to real_B using an L1 loss, since real_A is normalized between -1 and 1 we have to apply the same normalization to rec_A
             self.rec_A = torch.tanh(self.rec_A[:,:1,:,:,:]) # L1 loss in cycle consitency
+
+            if self.opt.detach_seg:
+                self.seg_rec_mask_A_detached = self.rec_A_detached[:,1:2,:,:,:] # no sigmoid as we use BCEwithLogits when comparing to real_mask_A
+                self.seg_rec_contours_A_detached = self.rec_A_detached[:,2:3,:,:,:] # no sigmoid as we use BCEwithLogits when comparing to real_contour_A
+                if  self.opt.bcd and self.rec_A_detached.shape[1] == 4:
+                    self.seg_rec_distance_A_detached = torch.tanh(self.rec_A_detached[:,3:4,:,:,:]) # D_B_BCD evaluates real_distance_A vs seg_rec_distance_B_detached, since real_distance_A is normalized between -1 and 1 we have to apply the same normalization to seg_rec_distance_B_detached
 
             # forward pass B->A
             # we do not have GT label components for B
@@ -480,12 +501,20 @@ class CycleGANModel(BaseModel):
             # backward pass (reconstruction) B_syn -> A
             # Cylce consistency loss: A_M ≈ G_B(G_A(A_M))
             # mask difference
-            self.loss_seg_rec_logits_mask = self.criterionMask(self.seg_rec_mask_A, self.cerberus_label_mask) * self.opt.cerberus_mask_weight
-            # contour difference
-            self.loss_seg_rec_logits_contour = self.criterionCont(self.seg_rec_contours_A, self.cerberus_label_contours) * self.opt.cerberus_contour_weight
-            if self.opt.bcd:
-                # distance map difference
-                self.loss_seg_rec_logits_distance = self.criterionDist(self.seg_rec_distance_A, self.cerberus_label_distance) * self.opt.cerberus_distance_weight
+            if self.opt.detach_seg:
+                self.loss_seg_rec_logits_mask_detached = self.criterionMask(self.seg_rec_mask_A_detached, self.cerberus_label_mask) * self.opt.cerberus_mask_weight
+                # contour difference
+                self.loss_seg_rec_logits_contour_detached = self.criterionCont(self.seg_rec_contours_A_detached, self.cerberus_label_contours) * self.opt.cerberus_contour_weight
+                if self.opt.bcd:
+                    # distance map difference
+                    self.loss_seg_rec_logits_distance_detached = self.criterionDist(self.seg_rec_distance_A_detached, self.cerberus_label_distance) * self.opt.cerberus_distance_weight
+            else:
+                self.loss_seg_rec_logits_mask = self.criterionMask(self.seg_rec_mask_A, self.cerberus_label_mask) * self.opt.cerberus_mask_weight
+                # contour difference
+                self.loss_seg_rec_logits_contour = self.criterionCont(self.seg_rec_contours_A, self.cerberus_label_contours) * self.opt.cerberus_contour_weight
+                if self.opt.bcd:
+                    # distance map difference
+                    self.loss_seg_rec_logits_distance = self.criterionDist(self.seg_rec_distance_A, self.cerberus_label_distance) * self.opt.cerberus_distance_weight
 
             # (Pseudo-Cycle) Consistency loss: A_C ≈ G_A(B_C)
             lambda_B_BCD = self.opt.lambda_B_BCD
@@ -537,7 +566,16 @@ class CycleGANModel(BaseModel):
           
         if self.opt.cerberus:
             # add the mask and contour losses for the A->B->A loop
-            cerberus_loss = self.loss_seg_syn_logits_mask + self.loss_seg_syn_logits_contour + self.loss_seg_rec_logits_mask + self.loss_seg_rec_logits_contour
+            if self.opt.detach_seg:
+                cerberus_loss = self.loss_seg_syn_logits_mask + self.loss_seg_syn_logits_contour + self.loss_seg_rec_logits_mask_detached + self.loss_seg_rec_logits_contour_detached
+                # add the distance based losses for the A->B->A loop
+                if self.opt.bcd:
+                    cerberus_loss = cerberus_loss + self.loss_seg_syn_logits_distance + self.loss_seg_rec_logits_distance_detached
+            else:
+                cerberus_loss = self.loss_seg_syn_logits_mask + self.loss_seg_syn_logits_contour + self.loss_seg_rec_logits_mask + self.loss_seg_rec_logits_contour
+                # add the distance based losses for the A->B->A loop
+                if self.opt.bcd:
+                    cerberus_loss = cerberus_loss + self.loss_seg_syn_logits_distance + self.loss_seg_rec_logits_distance
             # add the adverserial losses
             if self.opt.cerberus_D_weight_syn > 0.0:
                 cerberus_loss = cerberus_loss + self.loss_G_B_BCD_syn
@@ -545,9 +583,8 @@ class CycleGANModel(BaseModel):
                 cerberus_loss = cerberus_loss + self.loss_G_B_BCD_rec
             if lambda_B_BCD > 0.0:
                 cerberus_loss = cerberus_loss + self.loss_cycle_B_BCD
-            # add the distance based losses for the A->B->A loop
-            if self.opt.bcd:
-                cerberus_loss = cerberus_loss + self.loss_seg_syn_logits_distance + self.loss_seg_rec_logits_distance
+
+               
 
             self.loss_G = cerberus_loss + self.loss_G_A + self.loss_G_B + self.loss_cycle_A + self.loss_cycle_B + self.loss_idt_A + self.loss_idt_B
         else:
