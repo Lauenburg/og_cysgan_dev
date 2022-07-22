@@ -42,7 +42,7 @@ if __name__=='__main__':
     res = neuroglancer.CoordinateSpace(
         names=['z', 'y', 'x'],
         units=['nm', 'nm', 'nm'],
-        scales=[1000, 333, 333])
+        scales=[2500, 333, 333])
 
     def load_data(filename, dtype, object='main'):
         if filename.split(".")[-1] == "h5":
