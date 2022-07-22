@@ -1,0 +1,12 @@
+cellpose 
+yacs
+os
+h5py
+numpy
+matplotlib
+numpy
+PIL
+skimage
+tifffile
+tqdm
+glob
